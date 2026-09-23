@@ -1,11 +1,13 @@
-# TradeCharts — Forex + Crypto Charting Platform
-### TradingView Alternative (Forex & Crypto only)
+# TradeCharts — Crypto Charting Platform
+### TradingView Alternative (Crypto only — MVP phase, 100% free data)
+
+> **Scope note:** Abhi ke liye sirf **Crypto** (Binance free WebSocket data). Forex baad mein add hoga jab paid data provider (Finnhub/Twelve Data) le sakein — real-time forex ka koi reliable free source nahi hai. Poora architecture forex-ready hi rakha hai, bas data-source layer swap karna hoga.
 
 ---
 
 ## 1. Overview
 
-Ek web-based real-time charting platform, sirf **Forex** aur **Crypto** markets ke liye. TradingView jaisa look-and-feel, lekin lightweight aur focused.
+Ek web-based real-time charting platform, MVP mein sirf **Crypto** markets ke liye (Binance ka free WebSocket feed use karte hue — koi API key ya cost nahi). TradingView jaisa look-and-feel, lekin lightweight aur focused. Architecture is tarah design kiya gaya hai ki Forex baad mein ek naya data-source plug-in karke add ho sake, bina baaki system chhede.
 
 **Tech Stack:**
 - **Frontend:** Next.js 14 (App Router) + TypeScript
@@ -28,7 +30,7 @@ Ek web-based real-time charting platform, sirf **Forex** aur **Crypto** markets 
 | Timeframes | 1m, 5m, 15m, 1h, 4h, 1D, 1W |
 | Indicators | EMA, SMA, RSI, MACD, VWAP, Bollinger Bands |
 | Drawing tools | Trendline, Horizontal/Vertical Line, Fibonacci Retracement, Rectangle |
-| Symbol search | Autocomplete, recent searches |
+| Symbol search | Autocomplete, recent searches (crypto pairs) |
 | Watchlist | User-specific, saved in DB |
 | Price alerts | Trigger via WebSocket push + email/notification |
 | Multi-chart layout | 1 / 2 / 4 charts in one window (grid layout) |
@@ -37,12 +39,17 @@ Ek web-based real-time charting platform, sirf **Forex** aur **Crypto** markets 
 
 ---
 
-## 3. Data Sources (Forex + Crypto)
+## 3. Data Source (Crypto — MVP)
 
-- **Crypto:** Binance WebSocket API (free, real-time klines/trades) — `wss://stream.binance.com:9443`
-- **Forex:** 
-  - Free/cheap options: **Twelve Data**, **Finnhub**, **OANDA API**, **Polygon.io**
-  - Forex market thoda tricky hai kyunki free real-time forex feeds limited hain — Twelve Data ya Finnhub recommended for MVP.
+- **Crypto:** Binance WebSocket API — **100% free, no API key required**
+  - Live trades/klines: `wss://stream.binance.com:9443/ws/<symbol>@kline_<interval>`
+  - Symbols: BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, etc. (Binance ke saare USDT pairs available)
+  - Historical candles: Binance REST `GET /api/v3/klines` (free, no key needed, generous rate limit)
+  - Rate limits: 1200 requests/min (REST), WebSocket connections unlimited streams per connection — MVP ke liye kaafi zyada hai
+
+**Forex (future phase — not in MVP):**
+- Jab add karna ho: Finnhub (free WS, limited symbols) ya Twelve Data (delayed free tier) se start, phir paid tier
+- Data-source layer alag service (`forexFeed.ts`) mein already planned hai neeche — bas connect karna hoga
 
 ---
 
@@ -64,15 +71,15 @@ Ek web-based real-time charting platform, sirf **Forex** aur **Crypto** markets 
                             │
           ┌─────────────────┼─────────────────┐
           ▼                 ▼                 ▼
-    ┌──────────┐     ┌──────────────┐   ┌──────────┐
-    │ MongoDB  │     │ Binance WS   │   │ Forex API│
-    │ (users,  │     │ (crypto feed)│   │ (Twelve  │
-    │ watchlist,│    │              │   │ Data etc)│
-    │ alerts)  │     └──────────────┘   └──────────┘
-    └──────────┘
+    ┌──────────┐     ┌──────────────┐   ┌─────────────────┐
+    │ MongoDB  │     │ Binance WS   │   │ (Forex API —    │
+    │ (users,  │     │ (crypto feed,│   │  future phase,  │
+    │ watchlist,│    │  100% free)  │   │  not connected  │
+    │ alerts)  │     └──────────────┘   │  yet)           │
+    └──────────┘                        └─────────────────┘
 ```
 
-**Data flow:** Backend external feeds (Binance WS + Forex API) se live ticks leta hai → normalize karta hai (common OHLCV format) → apne WebSocket server se connected clients ko broadcast karta hai (symbol-wise rooms/channels).
+**Data flow:** Backend Binance WS se live ticks leta hai → normalize karta hai (common OHLCV format) → apne WebSocket server se connected clients ko broadcast karta hai (symbol-wise rooms/channels). Forex box abhi khaali hai — jab paid provider le lo, same pattern se `forexFeed.ts` plug kar dena, baaki system waise ka waisa rahega.
 
 ---
 
@@ -131,8 +138,8 @@ tradecharts/
 │       │   │   └── workspace.routes.ts
 │       │   ├── controllers/
 │       │   ├── services/
-│       │   │   ├── binanceFeed.ts
-│       │   │   ├── forexFeed.ts
+│       │   │   ├── binanceFeed.ts        # MVP — active
+│       │   │   ├── forexFeed.ts          # stub — future phase
 │       │   │   ├── alertEngine.ts
 │       │   │   └── candleAggregator.ts   # tick -> OHLC candle builder
 │       │   ├── ws/
@@ -250,13 +257,14 @@ Libraries: `technicalindicators` (npm package) use kar sakte ho — EMA, SMA, RS
 
 ---
 
-## 10. Roadmap (Milestones)
+## 10. Roadmap (Milestones) — Crypto-only MVP
 
-1. **MVP (2–3 weeks):** Auth, single chart, Binance crypto live data, basic candlestick + volume, timeframe switch
-2. **Phase 2:** Forex feed integration, indicators (EMA/SMA/RSI/MACD/VWAP), symbol search
+1. **MVP (1–2 weeks):** Auth, single chart, Binance crypto live data (free), basic candlestick + volume, timeframe switch
+2. **Phase 2:** Indicators (EMA/SMA/RSI/MACD/VWAP), symbol search (Binance pairs)
 3. **Phase 3:** Drawing tools (trendline, fib, horizontal line), multi-chart grid (1/2/4)
 4. **Phase 4:** Watchlist, price alerts + notification engine
 5. **Phase 5:** Saved workspaces, polish UI, performance optimization
+6. **Phase 6 (later, when budget hai):** Forex data provider connect karna (Finnhub/Twelve Data), `forexFeed.ts` activate karna — baaki poora system already forex-ready hai
 
 ---
 
@@ -266,15 +274,19 @@ Libraries: `technicalindicators` (npm package) use kar sakte ho — EMA, SMA, RS
 MONGODB_URI=
 JWT_SECRET=
 BINANCE_WS_URL=wss://stream.binance.com:9443
-FOREX_API_KEY=
-FOREX_API_PROVIDER=twelvedata
+BINANCE_REST_URL=https://api.binance.com
 NEXT_PUBLIC_WS_URL=ws://localhost:4000
+
+# Future — forex phase (not needed for MVP)
+# FOREX_API_KEY=
+# FOREX_API_PROVIDER=finnhub
 ```
 
 ---
 
 ## 12. Notes
 
-- Real-time forex data free me easily available nahi — budget rakhna padega (Twelve Data / Finnhub paid tiers) production ke liye.
+- Binance data 100% free hai, no API key, no cost — MVP ke liye zero data-budget chahiye.
 - `lightweight-charts` performance ke liye best hai (TradingView khud isi ko use karta hai apne open-source widget me).
 - Multi-chart grid ke liye har `ChartPanel` apna independent state + WS subscription rakhega — global store sirf layout config store karega.
+- Forex baad mein add karna ho to sirf `forexFeed.ts` implement karna hoga aur `symbol.type` field se routing karni hogi (crypto → Binance, forex → naya provider) — schema aur WS channels already dono support karte hain.
