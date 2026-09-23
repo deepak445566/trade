@@ -26,9 +26,18 @@ export const GET = route(
       void cacheCandles(symbol, tf, candles);
       return Response.json({ symbol, timeframe: tf, candles });
     } catch (err) {
-      console.warn("[candles] upstream failed, trying cache", err);
+      const reason = (err as Error).message;
+      console.warn("[candles] upstream failed, trying cache:", reason);
       const cached = await readCache(symbol, tf, limit, to).catch(() => []);
-      if (!cached.length) throw new HttpError(502, "Market data unavailable");
+      if (!cached.length) {
+        const blocked = reason.includes("451");
+        throw new HttpError(
+          502,
+          blocked
+            ? "Market data unavailable: Binance blocks this server's region (deploy functions outside the US)"
+            : "Market data unavailable",
+        );
+      }
       return Response.json({ symbol, timeframe: tf, candles: cached, cached: true });
     }
   },

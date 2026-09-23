@@ -45,8 +45,12 @@ class BinanceFeed implements MarketFeed {
   private lastMessageAt = 0;
   private watchdog: ReturnType<typeof setInterval> | null = null;
 
+  private urlIndex = 0;
+  private openedOnce = false;
+
+  /** @param wsBases candidate endpoints; rotates to the next one if a connection fails before opening. */
   constructor(
-    private wsBase: string,
+    private wsBases: string[],
     private name: string,
   ) {}
 
@@ -136,10 +140,13 @@ class BinanceFeed implements MarketFeed {
 
   private connect() {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) return;
-    const ws = new WebSocket(`${this.wsBase}/stream`);
+    const base = this.wsBases[this.urlIndex % this.wsBases.length];
+    this.openedOnce = false;
+    const ws = new WebSocket(`${base}/stream`);
     this.ws = ws;
 
     ws.onopen = () => {
+      this.openedOnce = true;
       this.reconnectDelay = 500;
       this.lastMessageAt = Date.now();
       this.upstream.clear();
@@ -163,6 +170,7 @@ class BinanceFeed implements MarketFeed {
       this.ws = null;
       this.upstream.clear();
       if (this.desired().size === 0) return;
+      if (!this.openedOnce && this.wsBases.length > 1) this.urlIndex++; // e.g. geo-blocked → try the mirror
       console.warn(`[${this.name}] disconnected — reconnecting in ${this.reconnectDelay}ms`);
       setTimeout(() => this.connect(), this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 5_000);
@@ -252,15 +260,20 @@ class BinanceFeed implements MarketFeed {
 // Singletons on globalThis (shared across dev hot-reloads and server bundles), keyed by URL.
 const g = globalThis as unknown as { __tcFeeds?: Map<string, BinanceFeed> };
 const feeds = (g.__tcFeeds ??= new Map());
-function feedFor(url: string, name: string): BinanceFeed {
-  let f = feeds.get(url);
+function feedFor(urls: string[], name: string): BinanceFeed {
+  const key = urls.join("|");
+  let f = feeds.get(key);
   if (!f) {
-    f = new BinanceFeed(url, name);
-    feeds.set(url, f);
+    f = new BinanceFeed(urls, name);
+    feeds.set(key, f);
   }
   return f;
 }
 
-export const spotFeed: MarketFeed = feedFor(env.BINANCE_WS_URL, "binance");
+/** Spot: primary endpoint, then Binance's public market-data mirror (not geo-restricted). */
+export const spotFeed: MarketFeed = feedFor(
+  [...new Set([env.BINANCE_WS_URL, "wss://data-stream.binance.vision"])],
+  "binance",
+);
 /** USDⓈ-M futures market-data route (klines/aggTrades are served under /market). */
-export const futuresFeed: MarketFeed = feedFor(env.BINANCE_FUTURES_WS_URL, "binance-futures");
+export const futuresFeed: MarketFeed = feedFor([env.BINANCE_FUTURES_WS_URL], "binance-futures");

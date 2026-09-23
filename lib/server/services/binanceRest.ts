@@ -3,27 +3,47 @@ import { env } from "../env";
 import { SPECIAL_MARKETS, resolveMarket } from "@/lib/markets";
 import type { Candle, SymbolInfo, Timeframe } from "@/types";
 
+/**
+ * Binance blocks some server regions (e.g. US datacenters return HTTP 451).
+ * Spot market data is also served by data-api.binance.vision, which is not
+ * geo-restricted, so it is used as a fallback. Futures (XAU/XAG) have no such
+ * mirror; deploy the functions in a non-US region (see vercel.json).
+ */
+const SPOT_BASES = () => [...new Set([env.BINANCE_REST_URL, "https://data-api.binance.vision"])];
+const FUTURES_BASES = () => [env.BINANCE_FUTURES_REST_URL];
+
+async function binanceGet(bases: string[], path: string, params: URLSearchParams, timeoutMs = 10_000) {
+  const errors: string[] = [];
+  for (const base of bases) {
+    const url = new URL(path, base);
+    url.search = params.toString();
+    try {
+      const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+      if (res.ok) return res;
+      const body = await res.text().catch(() => "");
+      errors.push(`${url.host} ${res.status}${res.status === 451 ? " (blocked in this server region)" : ""}: ${body.slice(0, 120)}`);
+      if (res.status === 400) break; // bad symbol/params: another host won't help
+    } catch (err) {
+      errors.push(`${url.host}: ${(err as Error).message}`);
+    }
+  }
+  throw new Error(`Binance ${path} failed — ${errors.join(" | ")}`);
+}
+
 export async function fetchKlines(
   symbol: string,
   timeframe: Timeframe,
   opts: { limit?: number; endTime?: number; startTime?: number } = {},
 ): Promise<Candle[]> {
   const { venue, upstream } = resolveMarket(symbol);
-  const url =
-    venue === "futures"
-      ? new URL("/fapi/v1/klines", env.BINANCE_FUTURES_REST_URL)
-      : new URL("/api/v3/klines", env.BINANCE_REST_URL);
-  url.searchParams.set("symbol", upstream);
-  url.searchParams.set("interval", timeframe);
-  url.searchParams.set("limit", String(Math.min(opts.limit ?? 500, 1000)));
-  if (opts.endTime) url.searchParams.set("endTime", String(opts.endTime * 1000));
-  if (opts.startTime) url.searchParams.set("startTime", String(opts.startTime * 1000));
+  const params = new URLSearchParams({ symbol: upstream, interval: timeframe, limit: String(Math.min(opts.limit ?? 500, 1000)) });
+  if (opts.endTime) params.set("endTime", String(opts.endTime * 1000));
+  if (opts.startTime) params.set("startTime", String(opts.startTime * 1000));
 
-  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Binance klines ${res.status}: ${body.slice(0, 200)}`);
-  }
+  const res =
+    venue === "futures"
+      ? await binanceGet(FUTURES_BASES(), "/fapi/v1/klines", params)
+      : await binanceGet(SPOT_BASES(), "/api/v3/klines", params);
   const rows = (await res.json()) as [number, string, string, string, string, string][];
   return rows.map((r) => ({
     time: Math.floor(r[0] / 1000),
@@ -41,11 +61,12 @@ const SYMBOL_TTL = 6 * 60 * 60 * 1000;
 export async function getSymbols(): Promise<SymbolInfo[]> {
   if (g.__tcSymbols2 && Date.now() - g.__tcSymbols2.at < SYMBOL_TTL) return g.__tcSymbols2.list;
 
-  const url = new URL("/api/v3/exchangeInfo", env.BINANCE_REST_URL);
-  url.searchParams.set("permissions", "SPOT");
-  url.searchParams.set("symbolStatus", "TRADING");
-  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) throw new Error(`Binance exchangeInfo ${res.status}`);
+  const res = await binanceGet(
+    SPOT_BASES(),
+    "/api/v3/exchangeInfo",
+    new URLSearchParams({ permissions: "SPOT", symbolStatus: "TRADING" }),
+    15_000,
+  );
   const data = (await res.json()) as { symbols: { symbol: string; baseAsset: string; quoteAsset: string }[] };
   const metals: SymbolInfo[] = Object.values(SPECIAL_MARKETS).map((m) => ({
     symbol: m.symbol,

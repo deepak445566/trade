@@ -19,6 +19,9 @@ import { isTimeframe, type CandleEvent } from "@/types";
  * One connection per browser tab carries every chart's subscriptions; the client
  * reopens it whenever its subscription set changes.
  */
+// Vercel ends a function at its max duration; EventSource then reconnects automatically.
+export const maxDuration = 300;
+
 export async function GET(req: NextRequest) {
   const subs = (req.nextUrl.searchParams.get("subs") ?? "")
     .split(",")
