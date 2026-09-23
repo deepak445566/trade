@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { IChartApi, ISeriesApi, SeriesType } from "lightweight-charts";
 import { serverNow } from "@/lib/streamClient";
-import { TIMEFRAME_SECONDS, type Candle, type Timeframe } from "@/types";
+import { candleEnd, type Candle, type Timeframe } from "@/types";
 
 export function formatCountdown(sec: number) {
   const s = Math.max(0, Math.floor(sec));
@@ -35,7 +35,6 @@ export default function CandleCountdown({ chart, series, getCandles, timeframe }
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const step = TIMEFRAME_SECONDS[timeframe];
     const tick = () => {
       const candles = getCandles();
       const last = candles[candles.length - 1];
@@ -45,7 +44,7 @@ export default function CandleCountdown({ chart, series, getCandles, timeframe }
         el.style.display = "none";
         return;
       }
-      const remaining = last.time + step - serverNow() / 1000;
+      const remaining = candleEnd(timeframe, last.time) - serverNow() / 1000;
       el.style.display = "block";
       el.style.top = `${Math.round(y + 10)}px`;
       el.style.width = `${chart.priceScale("right").width()}px`;

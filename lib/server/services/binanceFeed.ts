@@ -1,18 +1,12 @@
 import "server-only";
 import { env } from "../env";
 import { resolveMarket } from "@/lib/markets";
-import { TIMEFRAME_SECONDS, type Candle, type CandleEvent, type Timeframe } from "@/types";
+import { bucketStart, type Candle, type CandleEvent, type Timeframe } from "@/types";
 import type { MarketFeed, CandleListener } from "./feed";
 
-const WEEK_OFFSET = 4 * 86400; // Binance weekly candles open Monday 00:00 UTC (epoch was a Thursday)
 const TRADE_EMIT_MS = 150; // max ~7 updates/sec per stream from trades
 const STALE_MS = 15_000; // no message for this long while subscribed → force reconnect
 
-function bucketOf(tf: Timeframe, sec: number) {
-  const size = TIMEFRAME_SECONDS[tf];
-  const off = tf === "1w" ? WEEK_OFFSET : 0;
-  return Math.floor((sec - off) / size) * size + off;
-}
 
 interface StreamState {
   symbol: string;
@@ -221,7 +215,7 @@ class BinanceFeed implements MarketFeed {
     for (const [stream, st] of this.state) {
       if (!stream.startsWith(prefix) || !st.last) continue;
       const c = st.last.candle;
-      const bucket = bucketOf(st.timeframe, sec);
+      const bucket = bucketStart(st.timeframe, sec);
       let next: Candle;
       if (bucket === c.time) {
         next = { ...c, high: Math.max(c.high, price), low: Math.min(c.low, price), close: price, volume: c.volume + qty };

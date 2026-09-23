@@ -1,5 +1,5 @@
 import type { Candle, CandleEvent, Timeframe } from "@/types";
-import { TIMEFRAME_SECONDS } from "@/types";
+import { bucketStart } from "@/types";
 
 /**
  * Builds OHLCV candles from raw ticks. Binance already streams klines, so the
@@ -16,10 +16,7 @@ export class CandleAggregator {
 
   /** @param ts tick time in unix seconds */
   addTick(price: number, volume: number, ts: number) {
-    const size = TIMEFRAME_SECONDS[this.timeframe];
-    // Weekly candles align to Monday 00:00 UTC (epoch was a Thursday).
-    const offset = this.timeframe === "1w" ? 4 * 86400 : 0;
-    const bucket = Math.floor((ts - offset) / size) * size + offset;
+    const bucket = bucketStart(this.timeframe, ts);
 
     if (this.current && bucket > this.current.time) {
       this.emit({ symbol: this.symbol, timeframe: this.timeframe, candle: this.current, closed: true });

@@ -2,7 +2,7 @@ import { route, HttpError } from "@/lib/server/http";
 import { connectDB } from "@/lib/server/db";
 import { CandleModel } from "@/lib/server/models/Candle";
 import { fetchKlines } from "@/lib/server/services/binanceRest";
-import { isTimeframe, TIMEFRAME_SECONDS, type Candle } from "@/types";
+import { candleEnd, isTimeframe, type Candle, type Timeframe } from "@/types";
 
 /**
  * GET /api/candles?symbol=BTCUSDT&tf=1h&limit=500&to=<unix sec>&from=<unix sec>
@@ -48,7 +48,7 @@ async function cacheCandles(symbol: string, tf: string, candles: Candle[]) {
   try {
     await connectDB();
     const now = Date.now() / 1000;
-    const closed = candles.filter((c) => c.time + TIMEFRAME_SECONDS[tf as keyof typeof TIMEFRAME_SECONDS] <= now);
+    const closed = candles.filter((c) => candleEnd(tf as Timeframe, c.time) <= now);
     if (!closed.length) return;
     await CandleModel.bulkWrite(
       closed.map((c) => ({

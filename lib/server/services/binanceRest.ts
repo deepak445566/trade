@@ -1,7 +1,7 @@
 import "server-only";
 import { env } from "../env";
 import { SPECIAL_MARKETS, resolveMarket } from "@/lib/markets";
-import type { Candle, SymbolInfo, Timeframe } from "@/types";
+import { bucketStart, COMPOSITE_TIMEFRAMES, type Candle, type SymbolInfo, type Timeframe } from "@/types";
 
 /**
  * Binance blocks some server regions (e.g. US datacenters return HTTP 451).
@@ -30,11 +30,46 @@ async function binanceGet(bases: string[], path: string, params: URLSearchParams
   throw new Error(`Binance ${path} failed — ${errors.join(" | ")}`);
 }
 
+/** Merges consecutive candles into one (OHLCV). */
+export function mergeCandles(time: number, parts: Candle[]): Candle {
+  return {
+    time,
+    open: parts[0].open,
+    high: Math.max(...parts.map((c) => c.high)),
+    low: Math.min(...parts.map((c) => c.low)),
+    close: parts[parts.length - 1].close,
+    volume: parts.reduce((s, c) => s + c.volume, 0),
+  };
+}
+
+/** Groups native candles into `tf` buckets; a leading partial bucket is dropped (its open would be wrong). */
+export function aggregate(tf: Timeframe, base: Candle[], dropPartialHead = true): Candle[] {
+  const groups = new Map<number, Candle[]>();
+  for (const c of base) {
+    const b = bucketStart(tf, c.time);
+    let g = groups.get(b);
+    if (!g) groups.set(b, (g = []));
+    g.push(c);
+  }
+  const out = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([t, parts]) => mergeCandles(t, parts));
+  if (dropPartialHead && out.length && base.length && base[0].time !== out[0].time) out.shift();
+  return out;
+}
+
 export async function fetchKlines(
   symbol: string,
   timeframe: Timeframe,
   opts: { limit?: number; endTime?: number; startTime?: number } = {},
 ): Promise<Candle[]> {
+  const composite = COMPOSITE_TIMEFRAMES[timeframe];
+  if (composite) {
+    // e.g. 45m = 3 × 15m. Fetch enough native candles (max 1000 per request) and merge.
+    const limit = Math.min((opts.limit ?? 500) * composite.factor + composite.factor, 1000);
+    const base = await fetchKlines(symbol, composite.base, { ...opts, limit });
+    // Yearly: 1000 months reaches the listing date, so the first (partial) year is real — keep it.
+    return aggregate(timeframe, base, timeframe !== "1y");
+  }
+
   const { venue, upstream } = resolveMarket(symbol);
   const params = new URLSearchParams({ symbol: upstream, interval: timeframe, limit: String(Math.min(opts.limit ?? 500, 1000)) });
   if (opts.endTime) params.set("endTime", String(opts.endTime * 1000));
